@@ -6,19 +6,19 @@ import shap
 from lime.lime_tabular import LimeTabularExplainer
 import pandas as pd
 
-# Load trained model
+# Load model
 model = joblib.load("gradient_boosting_model.pkl")
 
-# Load training data (used only for explainability)
+# Load training data (for LIME & SHAP explainers)
 df = pd.read_csv("Enhanced_Kurigram_Dataset.csv").dropna()
 df["Risk_Level"] = df["Risk_Level"].replace({"High": 1, "Low": 0})
 X = df.drop(columns=["Risk_Level"]).values
 feature_names = df.drop(columns=["Risk_Level"]).columns.tolist()
 
-# SHAP explainer (Tree-based)
+# SHAP Explainer (TreeExplainer for Gradient Boosting)
 shap_explainer = shap.Explainer(model)
 
-# LIME explainer
+# LIME Explainer
 lime_explainer = LimeTabularExplainer(
     training_data=X,
     feature_names=feature_names,
@@ -39,10 +39,11 @@ def predict():
         data = request.get_json()
         features = np.array(data["features"]).reshape(1, -1)
 
-        # Prediction
-        prediction = int(model.predict(features)[0])
+        # Raw prediction
+        raw_prediction = int(model.predict(features)[0])
+        prediction_label = "High Risk" if raw_prediction == 1 else "Low Risk"
 
-        # SHAP explanation (top 5)
+        # SHAP Explanation (Top 5 features)
         shap_values = shap_explainer(features)
         shap_contributions = shap_values.values[0]
         top_shap = [
@@ -50,18 +51,19 @@ def predict():
             for i in np.argsort(np.abs(shap_contributions))[::-1][:5]
         ]
 
-        # LIME explanation (top 5)
+        # LIME Explanation (Top 5 features)
         lime_exp = lime_explainer.explain_instance(features[0], model.predict_proba, num_features=5)
         lime_contributions = [
             {
-                "feature": str(feat).split()[0],  # optional cleanup
+                "feature": str(feat),  # Use full condition string for clarity
                 "contribution": float(weight)
             }
             for feat, weight in lime_exp.as_list()
         ]
 
+        # Return combined result
         return jsonify({
-            "prediction": prediction,
+            "prediction": prediction_label,
             "shap_top_contributors": top_shap,
             "lime_top_contributors": lime_contributions
         })

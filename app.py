@@ -2,10 +2,11 @@ from flask import Flask, request, jsonify
 import joblib
 import numpy as np
 import os
-import shap
-from lime.lime_tabular import LimeTabularExplainer
 import pandas as pd
-from collections import OrderedDict
+from lime.lime_tabular import LimeTabularExplainer
+import matplotlib.pyplot as plt
+import base64
+from io import BytesIO
 
 # Load model
 model = joblib.load("gradient_boosting_model.pkl")
@@ -15,9 +16,6 @@ df = pd.read_csv("Enhanced_Kurigram_Dataset.csv").dropna()
 df["Risk_Level"] = df["Risk_Level"].replace({"High": 1, "Low": 0})
 X = df.drop(columns=["Risk_Level"]).values
 feature_names = df.drop(columns=["Risk_Level"]).columns.tolist()
-
-# SHAP Explainer
-shap_explainer = shap.Explainer(model)
 
 # LIME Explainer
 lime_explainer = LimeTabularExplainer(
@@ -32,7 +30,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "✅ Gradient Boosting API with SHAP + LIME is running!"
+    return "\u2705 Gradient Boosting API with LIME is running!"
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -40,23 +38,16 @@ def predict():
         data = request.get_json()
         features = np.array(data["features"]).reshape(1, -1)
 
-        # Prediction
+        # Predict
         raw_prediction = int(model.predict(features)[0])
         prediction_label = "High Risk" if raw_prediction == 1 else "Low Risk"
 
-        # SHAP Explanation
-        shap_values = shap_explainer(features)
-        shap_contributions = shap_values.values[0]
-        top_shap = [
-            {"feature": feature_names[i], "contribution": float(shap_contributions[i])}
-            for i in np.argsort(np.abs(shap_contributions))[::-1][:5]
-        ]
-
-        # LIME Explanation
-        lime_exp = lime_explainer.explain_instance(features[0], model.predict_proba, num_features=5)
+        # LIME Explanation (All features)
+        lime_exp = lime_explainer.explain_instance(features[0], model.predict_proba, num_features=len(feature_names))
         lime_contributions = []
+        feature_weights = {}
+
         for feat, weight in lime_exp.as_list():
-            # Smarter feature name match
             clean_feature = None
             for f in feature_names:
                 if feat.startswith(f) or f in feat:
@@ -69,12 +60,28 @@ def predict():
                 "feature": clean_feature,
                 "contribution": float(weight)
             })
+            feature_weights[clean_feature] = float(weight)
 
-        # Final ordered output
-        result = OrderedDict()
-        result["prediction"] = prediction_label
-        result["shap_top_contributors"] = top_shap
-        result["lime_top_contributors"] = lime_contributions
+        # Plot bar chart
+        plt.figure(figsize=(10, 6))
+        plt.barh(list(feature_weights.keys()), list(feature_weights.values()), color="skyblue")
+        plt.xlabel("Contribution Weight")
+        plt.title("LIME Feature Contributions")
+        plt.tight_layout()
+
+        # Encode chart as base64
+        buffer = BytesIO()
+        plt.savefig(buffer, format="png")
+        buffer.seek(0)
+        chart_base64 = base64.b64encode(buffer.read()).decode("utf-8")
+        buffer.close()
+
+        # Final response
+        result = {
+            "prediction": prediction_label,
+            "lime_contributors": lime_contributions,
+            "lime_chart_base64": chart_base64
+        }
 
         return jsonify(result)
 

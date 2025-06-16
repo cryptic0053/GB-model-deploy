@@ -5,19 +5,18 @@ import os
 import shap
 from lime.lime_tabular import LimeTabularExplainer
 import pandas as pd
-import re
-from collections import OrderedDict  # to keep JSON key order
+from collections import OrderedDict
 
-# Load model
+# Load the trained model
 model = joblib.load("gradient_boosting_model.pkl")
 
-# Load training data (for LIME & SHAP explainers)
+# Load training data for LIME & SHAP explainers
 df = pd.read_csv("Enhanced_Kurigram_Dataset.csv").dropna()
 df["Risk_Level"] = df["Risk_Level"].replace({"High": 1, "Low": 0})
 X = df.drop(columns=["Risk_Level"]).values
 feature_names = df.drop(columns=["Risk_Level"]).columns.tolist()
 
-# SHAP Explainer (TreeExplainer for Gradient Boosting)
+# SHAP Explainer
 shap_explainer = shap.Explainer(model)
 
 # LIME Explainer
@@ -41,7 +40,7 @@ def predict():
         data = request.get_json()
         features = np.array(data["features"]).reshape(1, -1)
 
-        # Raw prediction
+        # Predict risk label
         raw_prediction = int(model.predict(features)[0])
         prediction_label = "High Risk" if raw_prediction == 1 else "Low Risk"
 
@@ -53,18 +52,18 @@ def predict():
             for i in np.argsort(np.abs(shap_contributions))[::-1][:5]
         ]
 
-        # LIME Explanation (Top 5, cleaned names)
+        # LIME Explanation (Top 5)
         lime_exp = lime_explainer.explain_instance(features[0], model.predict_proba, num_features=5)
         lime_contributions = []
         for feat, weight in lime_exp.as_list():
-            match = re.match(r"([^\s><=]+)", feat)
-            clean_feature = match.group(1) if match else str(feat)
+            # Extract clean feature name
+            clean_feature = next((f for f in feature_names if f in feat), str(feat))
             lime_contributions.append({
                 "feature": clean_feature,
                 "contribution": float(weight)
             })
 
-        # Return in custom order using OrderedDict
+        # Ordered JSON response
         result = OrderedDict()
         result["prediction"] = prediction_label
         result["shap_top_contributors"] = top_shap

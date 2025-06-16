@@ -1,7 +1,7 @@
 flask
-scikit-learn
 numpy
+pandas
 joblib
+scikit-learn
 shap
 lime
-pandas

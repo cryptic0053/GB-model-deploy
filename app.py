@@ -5,6 +5,8 @@ import os
 import shap
 from lime.lime_tabular import LimeTabularExplainer
 import pandas as pd
+import re
+from collections import OrderedDict  # to keep JSON key order
 
 # Load model
 model = joblib.load("gradient_boosting_model.pkl")
@@ -43,7 +45,7 @@ def predict():
         raw_prediction = int(model.predict(features)[0])
         prediction_label = "High Risk" if raw_prediction == 1 else "Low Risk"
 
-        # SHAP Explanation (Top 5 features)
+        # SHAP Explanation (Top 5)
         shap_values = shap_explainer(features)
         shap_contributions = shap_values.values[0]
         top_shap = [
@@ -51,22 +53,24 @@ def predict():
             for i in np.argsort(np.abs(shap_contributions))[::-1][:5]
         ]
 
-        # LIME Explanation (Top 5 features)
+        # LIME Explanation (Top 5, cleaned names)
         lime_exp = lime_explainer.explain_instance(features[0], model.predict_proba, num_features=5)
-        lime_contributions = [
-            {
-                "feature": str(feat),  # Use full condition string for clarity
+        lime_contributions = []
+        for feat, weight in lime_exp.as_list():
+            match = re.match(r"([^\s><=]+)", feat)
+            clean_feature = match.group(1) if match else str(feat)
+            lime_contributions.append({
+                "feature": clean_feature,
                 "contribution": float(weight)
-            }
-            for feat, weight in lime_exp.as_list()
-        ]
+            })
 
-        # Return combined result
-        return jsonify({
-            "prediction": prediction_label,
-            "shap_top_contributors": top_shap,
-            "lime_top_contributors": lime_contributions
-        })
+        # Return in custom order using OrderedDict
+        result = OrderedDict()
+        result["prediction"] = prediction_label
+        result["shap_top_contributors"] = top_shap
+        result["lime_top_contributors"] = lime_contributions
+
+        return jsonify(result)
 
     except Exception as e:
         return jsonify({"error": str(e)})

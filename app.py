@@ -5,8 +5,8 @@ import os
 import pandas as pd
 from lime.lime_tabular import LimeTabularExplainer
 import matplotlib.pyplot as plt
+import io
 import base64
-from io import BytesIO
 
 # Load model
 model = joblib.load("gradient_boosting_model.pkl")
@@ -30,7 +30,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "\u2705 Gradient Boosting API with LIME is running!"
+    return "✅ Gradient Boosting API with LIME Visualization is running!"
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -38,52 +38,47 @@ def predict():
         data = request.get_json()
         features = np.array(data["features"]).reshape(1, -1)
 
-        # Predict
+        # Prediction
         raw_prediction = int(model.predict(features)[0])
         prediction_label = "High Risk" if raw_prediction == 1 else "Low Risk"
 
-        # LIME Explanation (All features)
+        # LIME Explanation (all features)
         lime_exp = lime_explainer.explain_instance(features[0], model.predict_proba, num_features=len(feature_names))
         lime_contributions = []
-        feature_weights = {}
+        weights_dict = dict(lime_exp.as_list())
 
-        for feat, weight in lime_exp.as_list():
-            clean_feature = None
-            for f in feature_names:
-                if feat.startswith(f) or f in feat:
-                    clean_feature = f
-                    break
-            if clean_feature is None:
-                clean_feature = str(feat)
-
+        for f in feature_names:
+            matched = next((feat for feat in weights_dict if f in feat), None)
+            contribution = weights_dict.get(matched, 0.0)
             lime_contributions.append({
-                "feature": clean_feature,
-                "contribution": float(weight)
+                "feature": f,
+                "contribution": float(contribution)
             })
-            feature_weights[clean_feature] = float(weight)
 
-        # Plot bar chart
-        plt.figure(figsize=(10, 6))
-        plt.barh(list(feature_weights.keys()), list(feature_weights.values()), color="skyblue")
-        plt.xlabel("Contribution Weight")
-        plt.title("LIME Feature Contributions")
+        # Plot chart
+        fig, ax = plt.subplots()
+        feat_names = [item["feature"] for item in lime_contributions]
+        contribs = [item["contribution"] for item in lime_contributions]
+        colors = ['green' if c > 0 else 'red' for c in contribs]
+
+        ax.barh(feat_names, contribs, color=colors)
+        ax.set_xlabel("Contribution to Prediction")
+        ax.set_title("LIME Explanation")
         plt.tight_layout()
 
-        # Encode chart as base64
-        buffer = BytesIO()
-        plt.savefig(buffer, format="png")
-        buffer.seek(0)
-        chart_base64 = base64.b64encode(buffer.read()).decode("utf-8")
-        buffer.close()
+        # Convert plot to base64
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png")
+        buf.seek(0)
+        image_base64 = base64.b64encode(buf.read()).decode("utf-8")
+        buf.close()
+        plt.close()
 
-        # Final response
-        result = {
+        return jsonify({
             "prediction": prediction_label,
-            "lime_contributors": lime_contributions,
-            "lime_chart_base64": chart_base64
-        }
-
-        return jsonify(result)
+            "lime_contributions": lime_contributions,
+            "lime_chart_base64": image_base64
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)})

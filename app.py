@@ -7,10 +7,10 @@ from lime.lime_tabular import LimeTabularExplainer
 import pandas as pd
 from collections import OrderedDict
 
-# Load the trained model
+# Load model
 model = joblib.load("gradient_boosting_model.pkl")
 
-# Load training data for LIME & SHAP explainers
+# Load training data
 df = pd.read_csv("Enhanced_Kurigram_Dataset.csv").dropna()
 df["Risk_Level"] = df["Risk_Level"].replace({"High": 1, "Low": 0})
 X = df.drop(columns=["Risk_Level"]).values
@@ -27,7 +27,7 @@ lime_explainer = LimeTabularExplainer(
     mode="classification"
 )
 
-# Flask setup
+# Flask app
 app = Flask(__name__)
 
 @app.route("/")
@@ -40,11 +40,11 @@ def predict():
         data = request.get_json()
         features = np.array(data["features"]).reshape(1, -1)
 
-        # Predict risk label
+        # Prediction
         raw_prediction = int(model.predict(features)[0])
         prediction_label = "High Risk" if raw_prediction == 1 else "Low Risk"
 
-        # SHAP Explanation (Top 5)
+        # SHAP Explanation
         shap_values = shap_explainer(features)
         shap_contributions = shap_values.values[0]
         top_shap = [
@@ -52,18 +52,25 @@ def predict():
             for i in np.argsort(np.abs(shap_contributions))[::-1][:5]
         ]
 
-        # LIME Explanation (Top 5)
+        # LIME Explanation
         lime_exp = lime_explainer.explain_instance(features[0], model.predict_proba, num_features=5)
         lime_contributions = []
         for feat, weight in lime_exp.as_list():
-            # Extract clean feature name
-            clean_feature = next((f for f in feature_names if f in feat), str(feat))
+            # Smarter feature name match
+            clean_feature = None
+            for f in feature_names:
+                if feat.startswith(f) or f in feat:
+                    clean_feature = f
+                    break
+            if clean_feature is None:
+                clean_feature = str(feat)
+
             lime_contributions.append({
                 "feature": clean_feature,
                 "contribution": float(weight)
             })
 
-        # Ordered JSON response
+        # Final ordered output
         result = OrderedDict()
         result["prediction"] = prediction_label
         result["shap_top_contributors"] = top_shap
